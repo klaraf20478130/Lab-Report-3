@@ -1,0 +1,566 @@
+ #include <Keypad.h>
+#include <LiquidCrystal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <MPU6050_tockn.h>
+#include <Wire.h>
+#include<math.h>
+MPU6050 mpu6050(Wire);
+
+int newPosition = 0, oldPosition = 0, Position = 0, distance1 = 0, distance2 = 0;
+int x,i,n,a = 0;
+char y;
+int f1 = 0, f2 = 0;
+int I2C_array[30];
+int leftMotor_speed = 0, rightMotor_speed = 0, servoAngle = 0;
+const int rs = 5, en = 23, d4 = 18, d5 = 17, d6 = 16, d7 = 15;
+int p = 100;
+int baseSpeed = 150; //EEEBot motor stable speed
+int midServo = 98; //EEEBot center steering
+float zRad,zSum,zTotal;
+float Rold = 0;
+int Target = 98;
+double errorSum = 0; // Sum of errors variable
+double lastError=0; //  Variable for previous error
+float angle = 0;
+ 
+double Output;
+double Kp= 10 , Ki=0, Kd= 0;
+float K = 0.166;  //Motor speed scaling factor
+ 
+void Straight_follow(float zTotal);
+
+LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
+
+#define ROW_NUM     4 // four rows
+#define COLUMN_NUM  3 // three columns
+#define I2C_SLAVE_ADDR 0x04 // 4 in hexadecimal
+
+
+char keys[ROW_NUM][COLUMN_NUM] = {
+  {'1', '2', '3'},
+  {'4', '5', '6'},
+  {'7', '8', '9'},
+  {'*', '0', '#'}
+};
+
+byte pin_rows[ROW_NUM] = {14, 27, 0, 4}; // GIOP18, GIOP5, GIOP17, GIOP16 connect to the row pins
+byte pin_column[COLUMN_NUM] = {33, 32, 2};
+
+Keypad keypad = Keypad( makeKeymap(keys), pin_rows, pin_column, ROW_NUM, COLUMN_NUM );
+
+void setup()
+{
+  
+  Serial.begin(9600);
+  Wire.begin();
+  // lcd.createChar(0, upArrow);
+  // lcd.createChar(1, downArrow);
+  mpu6050.begin();
+  mpu6050.calcGyroOffsets(true);
+  Target = mpu6050.getAngleZ();
+  lcd.begin(16,2);
+  lcd.setCursor(0,0);
+  lcd.clear();
+  
+  
+}
+
+
+
+void loop(){
+  char key = keypad.getKey();
+  lcd.clear();
+    
+  lcd.setCursor(0,0);
+  
+  lcd.print("2-Up");
+  lcd.setCursor(0, 1);
+  lcd.print("5-Back");
+  lcd.setCursor(9, 0);
+  lcd.print("4-Left");
+  lcd.setCursor(9, 1);
+  lcd.print("6-Right");
+
+  
+  
+  if (key){
+   
+    if(key == '2')
+    {
+      I2C_array[i] = Forwards();
+      
+    }
+          
+    else if(key == '5')
+    {
+     I2C_array[i] = Backwards();     
+    }
+    else if(key == '4')
+    {
+      Left();
+      I2C_array[i] = 1;
+    }
+    
+    else if(key == '6')
+    {
+      Right();
+      I2C_array[i] = 0; 
+      
+    }
+    
+    i = i +1;
+    if (key == '*')
+    {
+      lcd.clear();
+      lcd.print("Validating...");
+      int t = 0;
+      for(t=0; t<(i-1);t++)
+      {
+        //Serial.println(I2C_array[t]);
+        if (I2C_array[t] == 10)
+        { 
+          oldPosition = encoder();
+          StraightPID();
+          Position = 0;
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.8;;
+            Serial.print(oldPosition);
+            Serial.print("\t");
+            Serial.print(newPosition);
+            Serial.print("\t");
+            Serial.print(Position);
+            Serial.print("\n");
+          }
+          while(Position < 10);
+          Position = 0;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);          
+        }
+        else if (I2C_array[t] == 20)
+        { 
+          oldPosition = encoder();
+          StraightPID();
+          Position = 0;
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.8;
+            Serial.print(Position);
+            Serial.print("\n");
+            
+          }
+          while(Position < 20);
+          Position = 0;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);          
+        }
+        else if (I2C_array[t] == 30)
+        {
+          oldPosition = encoder();
+          StraightPID();
+          Position = 0;
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.8;
+            //Serial.print(Position);
+            //Serial.print("\n");
+          }
+          while(Position < 30);
+          Position = -999;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);    
+        }
+        else if (I2C_array[t] == 40)
+        {
+          oldPosition = encoder();
+          StraightPID();
+          Position = 0;
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.2;
+            Serial.print(Position);
+            Serial.print("\n");
+          }
+          while(Position < 40);
+          Position = 0;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);    
+        }
+        else if (I2C_array[t] == 50)
+        {
+          oldPosition = encoder();
+          StraightPID();
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.2;
+            Serial.print(Position);
+            Serial.print("\n");
+          }
+          while(Position < 50);
+          Position = -999;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);    
+        }
+        else if (I2C_array[t] == 60)
+        {
+          oldPosition = encoder();
+          StraightPID();
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.2;
+            //Serial.print(Position);
+            //Serial.print("\n");
+          }
+          while(Position < 60);
+          Position = -999;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);    
+        }
+        else if (I2C_array[t] == 70)
+        {
+          oldPosition = encoder();
+          StraightPID();
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.2;
+            //Serial.print(Position);
+            //Serial.print("\n");
+          }
+          while(Position < 70);
+          Position = -999;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);    
+        }
+        else if (I2C_array[t] == 80)
+        {
+          oldPosition = encoder();
+          StraightPID();
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.2;
+            //Serial.print(Position);
+            //Serial.print("\n");
+          }
+          while(Position < 80);
+          Position = -999;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);    
+        }
+        else if (I2C_array[t] == 90)
+        {
+          oldPosition = encoder();
+          StraightPID();
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          do 
+          {
+            newPosition = encoder()+1;
+            Position = (newPosition - oldPosition)*1.2;
+            //Serial.print(Position);
+            //Serial.print("\n");
+          }
+          while(Position < 90);
+          Position = -999;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 100;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);    
+        }
+        else if (I2C_array[t] == 0)
+        {
+          
+          leftMotor_speed = 130;
+          rightMotor_speed = 0;
+          servoAngle = 145;
+          ArduinoTransmission(leftMotor_speed,rightMotor_speed, servoAngle);
+          angle = 0;
+          while (angle > -90) 
+          {
+            angle = mpu();
+          }
+          angle = 0;
+          //stop
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 145;
+          ArduinoTransmission(leftMotor_speed, rightMotor_speed, servoAngle);
+          delay(1000);
+        }
+        else if (I2C_array[t] == 1)
+        {
+          leftMotor_speed = 0;
+          rightMotor_speed = 130;
+          servoAngle = 65;
+          ArduinoTransmission(leftMotor_speed,rightMotor_speed, servoAngle);
+          angle = 0;
+          while (angle < 90)
+          {
+            angle = mpu();
+          }
+          angle = 0;
+          leftMotor_speed = 0;
+          rightMotor_speed = 0;
+          servoAngle = 96;
+          ArduinoTransmission(leftMotor_speed,rightMotor_speed, servoAngle);
+          delay(1000);
+        }
+      }
+      
+    }
+  }
+}
+
+int encoder()
+{
+  Wire.requestFrom(I2C_SLAVE_ADDR, 4);
+  
+  int16_t distance1 = 0;
+  int16_t distance2 = 0;
+  
+  uint8_t distance116_9 = Wire.read();  // receive bits 16 to 9 of x (one byte)
+  uint8_t distance18_1 = Wire.read();   // receive bits 8 to 1 of x (one byte)
+  uint8_t distance216_9 = Wire.read();   // receive bits 16 to 9 of y (one byte)
+  uint8_t distance28_1 = Wire.read();   // receive bits 8 to 1 of y (one byte)
+
+  distance1 = (distance116_9 << 8) | distance18_1; // combine the two bytes into a 16 bit number
+  distance2 = (distance216_9 << 8) | distance28_1; // combine the two bytes into a 16 bit number
+
+ // Serial.print("distance1: ");
+  //Serial.print(distance1);
+  //Serial.print("\t");
+  //Serial.print("distance2: ");
+  //Serial.println(distance2);
+  delay(100);
+  return(distance2);
+}
+
+int Forwards()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Forwards");
+  while(a == 0)
+  {
+  y = keypad.getKey(); 
+  
+  if(y == '1')
+  {
+    n = 10;
+  }
+  if(y == '2')
+  {
+    n = 20;
+  }
+  if(y == '3')
+  {
+    n = 30;
+  }
+  if(y == '4')
+  {
+    n = 40;
+  }
+  if(y == '5')
+  {
+    n = 50;
+  }
+  if(y == '6')
+  {
+    n = 60;
+  }
+  if(y == '7')
+  {
+    n = 70;
+  }
+  if(y == '8')
+  {
+    n = 80;
+  }
+  if(y == '9')
+  {
+    n = 90;
+  }
+
+  lcd.setCursor(0,1);
+  lcd.print(n);
+  
+  
+  //ArduinoTransmssion(leftMotor_speed, rightMotor_speed, servoAngle);
+    
+  if ( y == '#')
+  {
+    break;
+  }
+  }
+  return (n);
+}
+
+int Backwards()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Backwards");
+  while(a == 0)
+  {
+  y = keypad.getKey(); 
+  
+  if(y == '1')
+  {
+    n = 10;
+  }
+  if(y == '2')
+  {
+    n = 20;
+  }
+  if(y == '3')
+  {
+    n = 30;
+  }
+  if(y == '4')
+  {
+    n = 40;
+  }
+  if(y == '5')
+  {
+    n = 50;
+  }
+  if(y == '6')
+  {
+    n = 60;
+  }
+  if(y == '7')
+  {
+    n = 70;
+  }
+  if(y == '8')
+  {
+    n = 80;
+  }
+  if(y == '9')
+  {
+    n = 90;
+  }
+
+  lcd.setCursor(0,1);
+  lcd.print(n);
+  
+  if ( y == '#')
+  {
+    break;
+  }
+  }
+  return (n);
+}
+
+void Left ()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Left");
+  while (a == 0)
+  {
+    y = keypad.getKey();
+    if (y == '#')
+    {
+      break;
+    }
+    
+  }
+}
+
+int Right ()
+{
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Right");
+  while (a == 0)
+  {
+    y = keypad.getKey();
+    if (y == '#')
+    {
+      return(0);
+    }
+    
+  }
+}
+
+float mpu ()
+{
+  float Smax = Target + 0.9;
+  float Smin = Target - 0.9;
+  float zSum = 0;
+  float zTotal = 0;
+  mpu6050.update();
+  for(int k = 0; k<= y ;++k){
+    zRad = 1.0204 * mpu6050.getAngleZ();
+    if(zRad <= Smax && zRad >= Smin){
+      zRad = Target;
+    }
+    zSum = zSum + zRad;
+  }
+    zTotal = zSum / y;
+    return(zTotal); 
+}
+
+void ArduinoTransmission(int leftMotor_speed, int rightMotor_speed, int servoAngle)
+{
+ Wire.beginTransmission(I2C_SLAVE_ADDR); // transmit to device #4
+ Wire.write((byte)((leftMotor_speed & 0x0000FF00) >> 8));    // first byte of x, containing bits 16 to 9
+ Wire.write((byte)(leftMotor_speed & 0x000000FF));           // second byte of x, containing the 8 LSB - bits 8 to 1
+ Wire.write((byte)((rightMotor_speed & 0x0000FF00) >> 8));   // first byte of y, containing bits 16 to 9
+ Wire.write((byte)(rightMotor_speed & 0x000000FF));          // second byte of y, containing the 8 LSB - bits 8 to 1
+ Wire.write((byte)((servoAngle & 0x0000FF00) >> 8));    // first byte of x, containing bits 16 to 9
+ Wire.write((byte)(servoAngle & 0x000000FF));
+ Wire.endTransmission();   // stop transmitting
+}
+
+
+void StraightPID ()
+{
+  //PID Control Algorithm
+  double error = Target - mpu();
+  errorSum = errorSum + error;
+  double dError = error - lastError;
+  Output = Kp * error + Ki * errorSum + Kd * dError;
+  lastError = error;
+  leftMotor_speed = baseSpeed + (K * Output);
+  rightMotor_speed = baseSpeed - (K * Output);
+  servoAngle = midServo - Output;
+ 
+    // Constrain the values to the appropriate range
+  leftMotor_speed = constrain(leftMotor_speed, 0, 255);
+  rightMotor_speed = constrain(rightMotor_speed, 0, 255);
+  servoAngle = constrain(servoAngle, 0, 140);
+  ArduinoTransmission(leftMotor_speed,rightMotor_speed, servoAngle);
+} 
