@@ -1,0 +1,73 @@
+#include <opencv2/opencv.hpp>
+#include <iostream>
+
+using namespace std;
+using namespace cv;
+
+int main()
+{
+    Mat image = imread("red_car.png");
+
+    if (image.data == NULL)
+    {
+        cout << "No image found! Check path." << endl;
+        return 1;   //this is iff there is no image found
+    }
+    else
+    {
+        //Convert to HSV
+        Mat hsv;
+        cvtColor(image, hsv, COLOR_BGR2HSV);
+
+        
+        Mat blueMask, greenMask, redMask;//this difines the HSV images
+        Mat redMask1, redMask2;
+
+       
+        inRange(hsv, Scalar(100, 50, 50), Scalar(130, 255, 255), blueMask);//this is the blue range
+
+        
+        inRange(hsv, Scalar(35, 100, 100), Scalar(75, 255, 255), greenMask);//this is for the green range
+
+        
+        Scalar lowerRed1 = Scalar(0, 100, 100);
+        Scalar upperRed1 = Scalar(10, 255, 255);
+        Scalar lowerRed2 = Scalar(170, 100, 100);
+        Scalar upperRed2 = Scalar(180, 255, 255);       //this is the red range
+        inRange(hsv, lowerRed1, upperRed1, redMask1);
+        inRange(hsv, lowerRed2, upperRed2, redMask2);
+        bitwise_or(redMask1, redMask2, redMask);
+
+        int bluePixels = 0;
+        bluePixels = countNonZero(blueMask);
+        std::cout << "Blue Pixels = " << bluePixels << std::endl;
+
+        int greenPixels = 0;
+        greenPixels = countNonZero(greenMask);
+        std::cout << "Green Pixels = " << greenPixels << std::endl;
+
+        int redPixels = 0;
+        redPixels = countNonZero(redMask);
+        std::cout << "Red Pixels = " << redPixels << std::endl;
+
+        
+        int pixelCounts[] = {bluePixels, greenPixels, redPixels};
+        char colorNames[3][10] = {"blue", "green", "red"};
+        char *predominantColor;
+        int largestPixelCount = pixelCounts[0];//values for the largews and frame
+        predominantColor = colorNames[0];
+
+        int numColors = 3;
+        for (int i = 1; i < numColors; i++) { //find the most commen colour
+            if (pixelCounts[i] > largestPixelCount) {
+                largestPixelCount = pixelCounts[i];
+                predominantColor = colorNames[i];
+            }
+        }
+
+        printf("The color of the predominant object is %s\n", predominantColor);
+        imshow("HSV image", redMask);
+        waitKey(0);
+        return 0;
+    }
+}
