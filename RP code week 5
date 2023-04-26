@@ -1,0 +1,138 @@
+// Include files for required libraries
+#include <stdio.h>
+
+#include "opencv_aee.hpp"
+#include "main.hpp"     // You can use this file for declaring defined values and functions
+#include "pi2c.h"
+
+//--------------------------------------------------------
+#define LINECOLOUR "red" //Change this for different colours
+#define CENTRECOORDINATE 160 //The centre coordinate of the x axis. Needs to be changed if the resolution is changed
+//--------------------------------------------------------
+
+
+//I2C communication
+//#define I2C_ADDRESS 0x68
+//-------
+
+Pi2c car(0x07); // Configure the I2C interface to the Car as a global variable
+
+void setup(void)
+{
+    //The camera is 320x240 pixels
+    setupCamera(320, 120);  // Enable the camera for OpenCV //Can change this so it takes up half
+}
+
+int main( int argc, char** argv )
+{
+    setup();    // Call a setup function to prepare IO and devices
+
+    cv::namedWindow("Photo");   // Create a GUI window called photo
+
+
+    while(1)    // Main loop to perform image processing
+    {
+        Mat frame;
+        Mat grey;
+        Mat thresh;
+        Mat colour_grey;
+
+        while(frame.empty())
+            frame = captureFrame(); // Capture a frame from the camera and store in a new matrix variable
+
+            cvtColor(frame, grey, COLOR_BGR2HSV);
+
+            //Changes depending on the colour
+            if (LINECOLOUR == "blue"){
+                inRange(grey, Scalar(80, 150, 0), Scalar(140, 255, 255), colour_grey); //Blue
+            }
+            else if (LINECOLOUR == "green"){
+                inRange(grey, Scalar(55, 150, 0), Scalar(85, 255, 255), colour_grey); //Green
+            }
+            else if (LINECOLOUR == "black"){
+                inRange(grey, Scalar(0, 0, 0), Scalar(180, 255, 75), colour_grey); //BLack
+            }
+            else if (LINECOLOUR == "red"){
+                Mat rmask1, rmask2;
+                Scalar lower_red1 = Scalar(0, 100, 100); //Red
+                Scalar upper_red1 = Scalar(10, 255, 255);
+                Scalar lower_red2 = Scalar(170, 100, 100);
+                Scalar upper_red2 = Scalar(180, 255, 255);
+                inRange(grey, lower_red1, upper_red1, rmask1);
+                inRange(grey, lower_red2, upper_red2, rmask2);
+                bitwise_or(rmask1, rmask2, colour_grey);
+            }
+            else if (LINECOLOUR == "yellow"){
+                Mat yblur;
+                inRange(grey, Scalar(20, 100, 100), Scalar(30, 255, 255), yblur); //Yellow
+                GaussianBlur(yblur, colour_grey, Size(5, 5), 0);
+            }
+
+            //Same for all colours from this point onwards
+            threshold(colour_grey, thresh, 127, 255, THRESH_BINARY); //Converts to binary image
+
+            std::vector<std::vector<Point>> contours;
+
+            findContours(thresh, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+            drawContours(frame, contours, -1, Scalar(0, 0, 255), 2); //Draws contour lines
+
+            int centre = frame.cols / 2; //centre of the screen
+            bool line_detected = false;
+            int cX, cY;
+
+            for (size_t i = 0; i < contours.size(); i++) {
+
+                Moments M = moments(contours[i]);
+                cX = static_cast<int>(M.m10 / M.m00);
+                cY = static_cast<int>(M.m01 / M.m00);
+                circle(frame, Point(cX, cY), 5, Scalar(255, 255, 255), -1); //Draws circle at centre
+
+                if (cX >= centre - 40 && cX <= centre + 40) {
+                    line_detected = true;
+                }
+            }
+
+            int error;
+
+            if (!line_detected) { //If the line isn't in the centre
+                if (contours.size() == 0){
+                    printf("Line not detected\n");
+                    error = 0; //Returns to 0 when the line is missing
+                    car.i2cWriteArduinoInt(error); //i2c
+                }
+                else{
+                    error = abs(160 - cX); //difference between the middle and cX
+                    printf("%d\n", error);
+                    car.i2cWriteArduinoInt(error); //i2c
+
+                }
+            }
+            else if (line_detected){ // line is in the center
+                printf("0\n"); //0 when the line is in the centre
+                error = 0; //Does not need to change speed or direction
+                car.i2cWriteArduinoInt(error); //i2c
+            }
+
+
+
+
+
+        //Display images - only used for checking. Not necessary
+        cv::flip(frame,frame,-1); //Flips the camera so it is not upside down
+        cv::flip(thresh,thresh,-1);
+
+        cv::imshow("Photo", frame); //Display the image in the window
+        cv::imshow("Photo2", thresh);
+
+        int key = cv::waitKey(1);   // Wait 1ms for a keypress (required to update windows)
+
+        key = (key==255) ? -1 : key;    // Check if the ESC key has been pressed
+        if (key == 27)
+            break;
+	}
+
+	closeCV();  // Disable the camera and close any windows
+
+	return 0;
+}
+
