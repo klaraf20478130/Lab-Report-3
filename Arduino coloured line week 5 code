@@ -1,0 +1,100 @@
+#include <Wire.h>
+
+#include <Servo.h>    //include the servo library
+#define servoPin 4
+Servo myservo; // create servo object to control a servo
+
+#define enA 5   //EnableA command line - should be a PWM pin
+#define enB 6   //EnableB command line - should be a PWM pin
+#define INa A0  //Channel A direction 
+#define INb A1  //Channel A direction 
+#define INc A2  //Channel B direction 
+#define INd A3  //Channel B direction 
+
+byte speedSetting = 0;  //initial speed = 0
+
+//Gain values------------------
+double kp = 1.0;
+double ki = 0.1;
+double kd = 0.01;
+
+unsigned long lastTime;  // Timestamp of the last iteration
+unsigned long sampleTime = 1;  // Time between measurements (ms)
+
+//Speed (Max is 255)
+int leftSpeed;
+int rightSpeed;
+int baseSpeed = 100;
+
+
+
+void receiveEvent(int howMany);
+
+void setup() {
+  Wire.begin(0x07);        
+  Wire.onReceive(receiveEvent);
+
+  myservo.attach(servoPin);  //Attach servo to pin D4
+
+  //Configure the motor control pins as outputs
+  pinMode(INa, OUTPUT);
+  pinMode(INb, OUTPUT);
+  pinMode(INc, OUTPUT);
+  pinMode(INd, OUTPUT);
+  pinMode(enA, OUTPUT);
+  pinMode(enB, OUTPUT);
+
+  lastTime = millis(); //Time
+
+  Serial.begin(9600);
+}
+
+void receiveEvent(int howMany) {
+  unsigned int error = 0; //Changed to prevent negative values
+
+  int last_error = 0;
+
+  //PID Equation Values---------  
+  double integral = 0.0;
+  double derivative = 0.0;
+  
+  //Time-------------------------
+  unsigned long currentTime = millis();
+  unsigned long elapsedTime = currentTime - lastTime; 
+  
+  if (elapsedTime >= sampleTime) {
+    int count=0;
+    while (Wire.available()) { // loop through all but the last
+      char c = Wire.read(); // receive byte as a character
+      error = (static_cast<unsigned char>(c)) << (8 * count) | error;
+      count++;
+    }
+    Serial.println(error);
+    integral = error * elapsedTime;
+    derivative = (error - last_error) / elapsedTime;
+  
+    //PID Formula-------------------
+    double u = kp*error + ki*integral + kd*derivative;
+    Serial.println(u);
+
+    last_error = error; //updates future equation
+    lastTime = currentTime;
+
+    digitalWrite(INa, HIGH);
+    digitalWrite(INb, LOW);
+    digitalWrite(INc, HIGH);
+    digitalWrite(INd, LOW);
+    
+    myservo.write(87+u);
+    leftSpeed = baseSpeed + 0.1*u;
+    rightSpeed = baseSpeed - 0.1*u;
+    analogWrite(enA, leftSpeed);
+    analogWrite(enB, rightSpeed);
+          
+  }
+  //Serial.println(error);
+  
+}
+
+void loop() {
+}
