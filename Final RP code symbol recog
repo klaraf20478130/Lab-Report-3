@@ -1,0 +1,307 @@
+// Include files for required libraries
+#include <stdio.h>
+
+#include "opencv_aee.hpp"
+#include "main.hpp"     // You can use this file for declaring defined values and functions
+#include "pi2c.h"
+
+
+#include <opencv2/opencv.hpp>
+#include <iostream>
+
+using namespace std;
+using namespace cv;
+
+//--------------------------------------------------------
+#define CENTRECOORDINATE 160 //The centre coordinate of the x axis. Needs to be changed if the resolution is changed
+//--------------------------------------------------------
+
+
+
+Pi2c car(0x08); // Configure the I2C interface to the Car as a global variable
+
+void setup(void)
+{
+    //The camera is 320x240 pixels
+    setupCamera(320, 240);  // Enable the camera for OpenCV //Can change this so it takes up half
+}
+
+int main( int argc, char** argv )
+{
+
+    //Symbols:
+    Mat c_img = imread("circle.png");
+    Mat s_img = imread("star.png");
+    Mat t_img = imread("triangle.png");
+    Mat u_img = imread("umbrella.png");
+
+    Mat c_hsv, s_hsv, t_hsv, u_hsv;
+    cvtColor(c_img, c_hsv, COLOR_BGR2HSV);
+    cvtColor(s_img, s_hsv, COLOR_BGR2HSV);
+    cvtColor(t_img, t_hsv, COLOR_BGR2HSV);
+    cvtColor(u_img, u_hsv, COLOR_BGR2HSV);
+
+    Mat c_grey, s_grey, t_grey, u_grey;
+    inRange(c_hsv, Scalar(130, 0, 0), Scalar(150, 255, 255), c_grey);
+    inRange(s_hsv, Scalar(130, 0, 0), Scalar(150, 255, 255), s_grey);
+    inRange(t_hsv, Scalar(130, 0, 0), Scalar(150, 255, 255), t_grey);
+    inRange(u_hsv, Scalar(130, 0, 0), Scalar(150, 255, 255), u_grey);
+
+    Mat c_thresh, s_thresh, t_thresh, u_thresh;
+    threshold(c_grey, c_thresh, 127, 255, THRESH_BINARY); //Converts to binary image
+    threshold(s_grey, s_thresh, 127, 255, THRESH_BINARY);
+    threshold(t_grey, t_thresh, 127, 255, THRESH_BINARY);
+    threshold(u_grey, u_thresh, 127, 255, THRESH_BINARY);
+
+    int linecolour = 5; //To associate line colour with the symbol
+
+    //Line Following:
+    setup();    // Call a setup function to prepare IO and devices
+
+    cv::namedWindow("Photo");   // Create a GUI window called photo
+
+
+    while(1)    // Main loop to perform image processing
+    {
+        Mat symbols_grey;
+        Mat symbols_thresh;
+        Mat symbols_blur;
+
+        Mat frame;
+        Mat hsv;
+        Mat thresh;
+        Mat colour_grey;
+
+        while(frame.empty())
+
+            frame = captureFrame(); // Capture a frame from the camera and store in a new matrix variable
+            cvtColor(frame, hsv, COLOR_BGR2HSV);
+
+            //Symbol Recognition
+            inRange(hsv, Scalar(140, 50, 50), Scalar(170, 255, 255), symbols_grey);
+            threshold(symbols_grey, symbols_thresh, 127, 255, THRESH_BINARY); //Converts to binary image
+            GaussianBlur(symbols_thresh, symbols_blur, Size(5, 5), 0);
+            std::vector<std::vector<Point>> symbols_contours;
+            findContours(symbols_thresh, symbols_contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+            drawContours(frame, symbols_contours, -1, Scalar(0, 0, 255), 2); //Draws contour lines
+
+            //Size of the output image
+            cv::Size output_size(350, 350); //Same size as the images (350x350)
+
+            for (size_t j = 0; j < symbols_contours.size(); j++) {
+                std::vector<std::vector<Point>> contours;
+                std::vector<Vec4i> hierarchy;
+                findContours(symbols_thresh.clone(), contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_NONE);
+
+                //Calculate the areas of the shapes
+                std::vector<double> all_areas;
+                for (int i = 0; i < contours.size(); i++) {
+                    double area = contourArea(contours[i]);
+                    all_areas.push_back(area);
+                }
+
+                std::sort(contours.begin(), contours.end(), [](const std::vector<Point>& c1, const std::vector<Point>& c2){
+                    return contourArea(c1) > contourArea(c2);
+                });
+
+                std::vector<Point> largest_item = contours[0];
+
+                //Displays largest contour on the screen
+                drawContours(frame, std::vector<std::vector<Point>>{largest_item}, -1, Scalar(255, 0, 0), 10);
+
+                //Find corners of the largest shape
+                std::vector<Point2f> corners;
+                approxPolyDP(largest_item, corners, 0.1 * arcLength(largest_item, true), true);
+                if (corners.size() != 4) {
+                    //When the largest shape is not a quadrilateral
+                    continue;
+                }
+
+                //Order corners
+                std::sort(corners.begin(), corners.end(), [](const Point2f& p1, const Point2f& p2){
+                    return p1.x + p1.y < p2.x + p2.y;
+                });
+                if (corners[0].y > corners[1].y) {
+                    std::swap(corners[0], corners[1]);
+                }
+                if (corners[2].y < corners[3].y) {
+                    std::swap(corners[2], corners[3]);
+                }
+
+                //Output image points
+                std::vector<Point2f> dst_corners {
+                    Point2f(0, 0),
+                    Point2f(0, output_size.height),
+                    Point2f(output_size.width, output_size.height),
+                    Point2f(output_size.width, 0)
+
+                };
+
+                // Compute perspective transform matrix
+                Mat transform_matrix = cv::getPerspectiveTransform(corners, dst_corners);
+
+                // Apply perspective transform to largest shape
+                Mat transformed_item;
+                cv::warpPerspective(symbols_grey, transformed_item, transform_matrix, output_size);
+
+                Mat transformed_item_thresh;
+                threshold(transformed_item, transformed_item_thresh, 127, 255, THRESH_BINARY);
+
+                cv::flip(transformed_item_thresh, transformed_item_thresh,-1); //flip camera
+
+                //Compares the transformed image with all of the png images
+                float c = compareImages(transformed_item_thresh, c_thresh); //How similar the images are
+                float s = compareImages(transformed_item_thresh, s_thresh);
+                float t = compareImages(transformed_item_thresh, t_thresh);
+                float u = compareImages(transformed_item_thresh, u_thresh);
+
+                float max_value;
+                max_value = max({c, s, t, u});
+
+                //Temporarily displays the image it most compares with
+                //if (max_value == c){
+                //    imshow("image", c_thresh);
+                //}
+                //else if (max_value == s){
+                //    imshow("image", s_thresh);
+                //}
+                //else if (max_value == t){
+                //    imshow("image", t_thresh);
+                //}
+                //else if (max_value == u){
+                //    imshow("image", u_thresh);
+                //}
+
+                if (max_value > 55.0){ //So it only changes when a symbol is identified
+
+                    imshow("Largest Object", transformed_item_thresh); //Stores the zoomed in image
+
+                    if (max_value == c){
+                        linecolour = 1; //red
+                    }
+                    else if (max_value == s){
+                        linecolour = 2; //green
+                    }
+                    else if (max_value == t){
+                        linecolour = 3; //blue
+                    }
+                    else if (max_value == u){
+                        linecolour = 4; //yellow
+                    }
+                    else{
+                        linecolour = 5; //black
+                    }
+                }
+            }
+            //printf("Line colour: %d\n", linecolour);
+
+            //Line Following - Changes depending on the colour
+            if (linecolour == 3){
+                inRange(hsv, Scalar(80, 150, 0), Scalar(140, 255, 255), colour_grey); //Blue
+            }
+            else if (linecolour == 2){
+                inRange(hsv, Scalar(55, 150, 0), Scalar(85, 255, 255), colour_grey); //Green
+            }
+            else if (linecolour == 5){
+                inRange(hsv, Scalar(0, 0, 0), Scalar(180, 255, 75), colour_grey); //Black
+            }
+            else if (linecolour == 1){
+                Mat rmask1, rmask2;
+                Scalar lower_red1 = Scalar(0, 50, 50); //Red
+                Scalar upper_red1 = Scalar(10, 255, 255);
+                Scalar lower_red2 = Scalar(170, 50, 50);
+                Scalar upper_red2 = Scalar(180, 255, 255);
+                inRange(hsv, lower_red1, upper_red1, rmask1);
+                inRange(hsv, lower_red2, upper_red2, rmask2);
+                bitwise_or(rmask1, rmask2, colour_grey);
+            }
+            else if (linecolour == 4){
+                Mat yblur;
+                inRange(hsv, Scalar(20, 100, 100), Scalar(30, 255, 255), yblur); //Yellow
+                GaussianBlur(yblur, colour_grey, Size(5, 5), 0);
+            }
+
+            Mat frame2; //to show the contours for the line on a separate screen
+            frame2 = captureFrame();
+
+            //Same for all colours from this point onwards
+            threshold(colour_grey, thresh, 127, 255, THRESH_BINARY); //Converts to binary image
+
+            std::vector<std::vector<Point>> contours2;
+
+            findContours(thresh, contours2, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+            drawContours(frame2, contours2, -1, Scalar(0, 0, 255), 2); //Draws contour lines
+
+            int centre = frame2.cols / 2; //centre of the screen
+            bool line_detected = false;
+            int cX, cY;
+
+            //Find the largest contour
+            double max_area = 0;
+            int largest_contour_index = 0;
+            for (size_t i = 0; i < contours2.size(); i++) {
+                double area = contourArea(contours2[i]);
+                if (area > max_area) {
+                    max_area = area;
+                    largest_contour_index = i;
+                }
+            }
+
+            if (max_area > 0) { // If a contour was found
+
+                Moments M = moments(contours2[largest_contour_index]);
+                cX = static_cast<int>(M.m10 / M.m00);
+                cY = static_cast<int>(M.m01 / M.m00);
+                circle(frame2, Point(cX, cY), 5, Scalar(255, 255, 255), -1); //Draws circle at centre
+            }
+
+            if (cX >= centre - 40 && cX <= centre + 40) {
+                    line_detected = true;
+            }
+
+
+            int error;
+
+            if (!line_detected) { //If the line isn't in the centre
+                if (contours2.size() == 0){
+                    printf("Line not detected\n"); //defaults the line being followed back to black
+                    linecolour = 5; //black
+                    //error = 0; //Returns to 0 when the line is missing
+                    //car.i2cWriteArduinoInt(error); //i2c
+                }
+                else{
+                    error = 160 - cX; //difference between the middle and cX
+                    printf("%d\n", error);
+                    car.i2cWriteArduinoInt(error); //i2c
+
+                }
+            }
+            else if (line_detected){ // line is in the center
+                printf("0\n"); //0 when the line is in the centre
+                error = 0; //Does not need to change speed or direction
+                car.i2cWriteArduinoInt(error); //i2c
+            }
+
+
+
+
+
+        //Display images - only used for checking. Not necessary for functionality
+        cv::flip(frame,frame,-1); //Flips the camera so it is not upside down
+        cv::flip(frame2,frame2,-1);
+
+        cv::imshow("Photo", frame); //Display the image in the window
+        cv::imshow("d", frame2);
+
+        int key = cv::waitKey(1);   // Wait 1ms for a keypress (required to update windows)
+
+        key = (key==255) ? -1 : key;    // Check if the ESC key has been pressed
+        if (key == 27)
+            break;
+	}
+
+	closeCV();  // Disable the camera and close any windows
+
+	return 0;
+}
+
